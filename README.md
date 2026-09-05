@@ -24,6 +24,31 @@ npm run build     # production bundle into dist/
 npm run preview   # serve that bundle
 ```
 
+## On your phone
+
+The dev server binds to localhost only, so nothing else on your network can
+reach it. To open it on a phone, start it with the host flag instead:
+
+```bash
+npm run dev:host
+```
+
+Vite then prints a second line — `Network: http://192.168.x.x:5173/`. Type that
+address into the phone's browser. The phone and the computer have to be on the
+same Wi-Fi, and the first time you do this your OS may ask you to let Node
+accept incoming connections.
+
+This is a separate script rather than the default because `--host` exposes the
+dev server to every device on the network.
+
+Off your network, build it and put `dist/` on any static host — it is plain
+files, no server needed.
+
+The layout is responsive down to 320px: below 600px the sheet goes single
+column, the checkpoint log switches to a two-line row, and the thermometer
+stacks its reading above the gauge. Sound is off until you press the button,
+which is also what unlocks audio on iOS.
+
 ## Dropping it into an existing app
 
 The component has no imports beyond React, so it travels alone:
