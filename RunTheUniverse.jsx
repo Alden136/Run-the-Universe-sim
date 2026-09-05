@@ -449,16 +449,55 @@ function buildAudio() {
   const nd = noiseBuf.getChannelData(0);
   for (let i = 0; i < len; i++) nd[i] = Math.random() * 2 - 1;
 
-  const humG = ctx.createGain(); humG.gain.value = 0;
+  /* The hum.
+     A drone that holds still is just a tone. This one is built to wander:
+     three voices, a cutoff, a tremolo and a band of air, each pushed by its
+     own slow oscillator. The rates share no common multiple, so the shape
+     they add up to takes the better part of an hour to repeat. Nothing here
+     is driven from React — it is all scheduled in the graph and left alone. */
+  const humG = ctx.createGain(); humG.gain.value = 0;        // on/off
+  const humTrem = ctx.createGain(); humTrem.gain.value = 1;  // breathing
   const humF = ctx.createBiquadFilter();
   humF.type = "lowpass"; humF.frequency.value = 240; humF.Q.value = 6;
-  humF.connect(humG); humG.connect(master);
-  const humOscs = [46, 46.9].map((f) => {
-    const o = ctx.createOscillator();
-    o.type = "sawtooth"; o.frequency.value = f;
-    o.connect(humF); o.start();
-    return o;
+  humF.connect(humTrem); humTrem.connect(humG); humG.connect(master);
+
+  /* a free-running oscillator wired into one parameter, at some depth */
+  const lfo = (rate, depth, target, type = "sine") => {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.value = rate;
+    const g = ctx.createGain(); g.gain.value = depth;
+    o.connect(g); g.connect(target); o.start();
+    return { o, g };
+  };
+
+  /* root, a beating near-unison, and a sub an octave down */
+  const humVoices = [
+    { mul: 1,    lvl: 0.50, type: "sawtooth", rate: 0.047, cents: 7 },
+    { mul: 1.02, lvl: 0.45, type: "sawtooth", rate: 0.031, cents: 11 },
+    { mul: 0.5,  lvl: 0.32, type: "triangle", rate: 0.019, cents: 5 },
+  ].map(({ mul, lvl, type, rate, cents }) => {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.value = 46 * mul;
+    const g = ctx.createGain(); g.gain.value = lvl;
+    o.connect(g); g.connect(humF); o.start();
+    lfo(rate, cents, o.detune);            // a few cents of drift, forever
+    return { o, mul };
   });
+
+  /* a thin band of moving air, outside the drone's own filter */
+  const humAir = ctx.createBufferSource();
+  humAir.buffer = noiseBuf; humAir.loop = true;
+  const airF = ctx.createBiquadFilter();
+  airF.type = "bandpass"; airF.frequency.value = 430; airF.Q.value = 1.1;
+  const airG = ctx.createGain(); airG.gain.value = 0.09;
+  humAir.connect(airF); airF.connect(airG); airG.connect(humTrem);
+  humAir.start();
+  lfo(0.013, 260, airF.frequency, "triangle");
+
+  /* two cutoff sweeps and two tremolos, all at unrelated rates */
+  const humSweepA = lfo(0.037, 70, humF.frequency);
+  const humSweepB = lfo(0.011, 30, humF.frequency, "triangle");
+  const humTremA = lfo(0.083, 0.13, humTrem.gain);
+  lfo(0.052, 0.07, humTrem.gain, "triangle");
+  let humCut = 240;
 
   const now = () => ctx.currentTime;
   let lastClack = 0;
@@ -545,13 +584,28 @@ function buildAudio() {
     },
     setHum(on, speed, future) {
       const t = now();
-      humG.gain.setTargetAtTime(on ? (future ? 0.045 : 0.055) : 0, t, 0.25);
+      humG.gain.setTargetAtTime(on ? (future ? 0.083 : 0.102) : 0, t, 0.25);
       if (on && isFinite(speed)) {
         const oct = Math.max(0, Math.min(20, Math.log10(speed))) / 20;
         const base = (future ? 26 : 40) + oct * (future ? 20 : 46);
-        humOscs.forEach((o, i) => o.frequency.setTargetAtTime(base * (1 + i * 0.02), t, 0.4));
-        humF.frequency.setTargetAtTime((future ? 110 : 180) + oct * (future ? 400 : 900), t, 0.4);
+        humVoices.forEach(({ o, mul }) => o.frequency.setTargetAtTime(base * mul, t, 0.4));
+        humCut = (future ? 110 : 180) + oct * (future ? 400 : 900);
+        humF.frequency.setTargetAtTime(humCut, t, 0.4);
+        /* the sweeps travel with the cutoff, so the wander scales with the gear */
+        humSweepA.g.gain.setTargetAtTime(humCut * 0.42, t, 0.6);
+        humSweepB.g.gain.setTargetAtTime(humCut * 0.20, t, 0.6);
+        /* past the present the drone slows down and breathes deeper */
+        humSweepA.o.frequency.setTargetAtTime(future ? 0.021 : 0.037, t, 1);
+        humTremA.g.gain.setTargetAtTime(future ? 0.2 : 0.13, t, 1);
       }
+    },
+    /* a checkpoint makes the machine lean into it */
+    humBump(strength = 1) {
+      const t = now();
+      humTrem.gain.setTargetAtTime(1 + 0.45 * strength, t, 0.05);
+      humTrem.gain.setTargetAtTime(1, t + 0.14, 0.45);
+      humF.frequency.setTargetAtTime(humCut * (1 + 0.7 * strength), t, 0.06);
+      humF.frequency.setTargetAtTime(humCut, t + 0.18, 0.6);
     },
     close() { try { ctx.close(); } catch (e) {} },
   };
@@ -644,9 +698,10 @@ export default function RunTheUniverse() {
     pendingRef.current = { tier: 0, future: p.future };
     const a = sound ? audioRef.current : null;
     if (!a) return;
-    if (p.gear) { a.gearshift(); return; }
+    if (p.gear) { a.gearshift(); a.humBump(1.4); return; }
     if (p.tier >= 3) p.future ? a.chime() : a.bell();
     else a.clack(p.tier === 2 ? 1.3 : 1);
+    a.humBump(p.tier >= 3 ? 1 : p.tier === 2 ? 0.5 : 0.28);
   }, [run.log.length, run.phase, sound]);
 
   useEffect(() => {
