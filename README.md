@@ -7,9 +7,24 @@ today — out to the last black hole and whatever is left after that.
 `RunTheUniverse.jsx` is self-contained: all styling is inline, the only
 dependency is React itself.
 
-## Running it
+## Just open it
 
-Requires [Node.js](https://nodejs.org) 18 or newer.
+`run-the-universe.html` is the whole app in one file — React and all — with
+nothing to install. Download it and double-click, or drag it into a Chrome tab.
+It works offline; the only thing it fetches is the webfonts, and it falls back
+to system monospace without them.
+
+That file is generated. If you change `RunTheUniverse.jsx`, rebuild it:
+
+```bash
+npm install
+npm run standalone
+```
+
+## Running it with a dev server
+
+Only worth it if you want hot reload while editing. Requires
+[Node.js](https://nodejs.org) 18 or newer.
 
 ```bash
 npm install
@@ -26,8 +41,11 @@ npm run preview   # serve that bundle
 
 ## On your phone
 
-The dev server binds to localhost only, so nothing else on your network can
-reach it. To open it on a phone, start it with the host flag instead:
+Easiest: put `run-the-universe.html` somewhere the phone can get at it — AirDrop
+it, email it, drop it in a cloud drive — and open it there.
+
+To reach the dev server instead, note that it binds to localhost only, so
+nothing else on your network can see it. Start it with the host flag:
 
 ```bash
 npm run dev:host
